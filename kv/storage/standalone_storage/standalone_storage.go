@@ -1,6 +1,7 @@
 package standalone_storage
 
 import (
+	"log"
 	"os"
 	"path/filepath"
 
@@ -43,7 +44,7 @@ func (s *StandAloneStorage) Stop() error {
 }
 
 func (s *StandAloneStorage) Reader(ctx *kvrpcpb.Context) (storage.StorageReader, error) {
-	txn := s.engines.Kv.NewTransaction(true)
+	txn := s.engines.Kv.NewTransaction(false)
 	return &StandaloneStorageReader{txn: txn}, nil
 }
 
@@ -53,13 +54,21 @@ func (s *StandAloneStorage) Write(ctx *kvrpcpb.Context, batch []storage.Modify) 
 		switch m.Data.(type) {
 		case storage.Put:
 			put := m.Data.(storage.Put)
+			log.Printf("write put: %v, detail: cf=%v, key=%v, val=%v", put, put.Cf, put.Key, put.Value)
 			wb.SetCF(put.Cf, put.Key, put.Value)
 		case storage.Delete:
 			delete := m.Data.(storage.Delete)
 			wb.DeleteCF(delete.Cf, delete.Key)
 		}
 	}
-	return wb.WriteToDB(s.engines.Kv)
+	err := wb.WriteToDB(s.engines.Kv)
+	if err != nil {
+		if err == badger.ErrKeyNotFound {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // reader
@@ -68,7 +77,14 @@ type StandaloneStorageReader struct {
 }
 
 func (r *StandaloneStorageReader) GetCF(cf string, key []byte) ([]byte, error) {
-	return engine_util.GetCFFromTxn(r.txn, cf, key)
+	val, err := engine_util.GetCFFromTxn(r.txn, cf, key)
+	if err != nil {
+		if err == badger.ErrKeyNotFound {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return val, nil
 }
 
 func (r *StandaloneStorageReader) IterCF(cf string) engine_util.DBIterator {

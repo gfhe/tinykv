@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log"
 	"os"
 	"testing"
 
@@ -63,6 +64,7 @@ func TestRawGet1(t *testing.T) {
 		Cf:  cf,
 	}
 	resp, err := server.RawGet(nil, req)
+	log.Printf("resp: %v\r\n\r\n", resp)
 	assert.Nil(t, err)
 	assert.Equal(t, []byte{42}, resp.Value)
 }
@@ -196,6 +198,7 @@ func TestRawDelete1(t *testing.T) {
 	assert.Nil(t, err)
 
 	val, err := Get(s, cf, []byte{99})
+	log.Printf("got: %v, %v", val, err)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, []byte(nil), val)
 }
