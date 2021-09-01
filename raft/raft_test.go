@@ -17,6 +17,7 @@ package raft
 import (
 	"bytes"
 	"fmt"
+	"log"
 	"math/rand"
 	"reflect"
 	"testing"
@@ -50,6 +51,7 @@ type stateMachine interface {
 
 func (r *Raft) readMessages() []pb.Message {
 	msgs := r.msgs
+	// log.Printf("[Raft_MSG]: %v", msgs)
 	r.msgs = make([]pb.Message, 0)
 
 	return msgs
@@ -1460,6 +1462,7 @@ func TestSplitVote2AA(t *testing.T) {
 
 	// simulate leader down. followers start split vote.
 	nt.isolate(1)
+	log.Println("before node 2 and 3 MsgHup")
 	nt.send([]pb.Message{
 		{From: 2, To: 2, MsgType: pb.MessageType_MsgHup},
 		{From: 3, To: 3, MsgType: pb.MessageType_MsgHup},
@@ -1489,6 +1492,7 @@ func TestSplitVote2AA(t *testing.T) {
 		t.Errorf("peer 3 state: %s, want %s", sm.State, StateCandidate)
 	}
 
+	log.Println("before node 2 MsgHup")
 	// node 2 election timeout first
 	nt.send(pb.Message{From: 2, To: 2, MsgType: pb.MessageType_MsgHup})
 

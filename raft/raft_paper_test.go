@@ -27,6 +27,7 @@ package raft
 
 import (
 	"fmt"
+	"log"
 	"reflect"
 	"sort"
 	"testing"
@@ -104,6 +105,13 @@ func TestLeaderBcastBeat2AA(t *testing.T) {
 		{From: 1, To: 2, Term: 1, MsgType: pb.MessageType_MsgHeartbeat},
 		{From: 1, To: 3, Term: 1, MsgType: pb.MessageType_MsgHeartbeat},
 	}
+	for i, msg := range msgs {
+		if i < len(wmsgs) {
+			log.Printf("entries type: %T, %T, %v", msg.Entries, wmsgs[i].Entries, reflect.DeepEqual(msg.Entries, wmsgs[i].Entries))
+			log.Printf("entries type: %v, %v", msg.Entries, wmsgs[i].Entries)
+
+		}
+	}
 	if !reflect.DeepEqual(msgs, wmsgs) {
 		t.Errorf("msgs = %v, want %v", msgs, wmsgs)
 	}
@@ -139,7 +147,7 @@ func testNonleaderStartElection(t *testing.T, state StateType) {
 
 	for i := 1; i < 2*et; i++ {
 		r.tick()
-	}
+	} // 超时后，再次发送RequestVote请求
 
 	if r.Term != 2 {
 		t.Errorf("term = %d, want 2", r.Term)
@@ -150,6 +158,7 @@ func testNonleaderStartElection(t *testing.T, state StateType) {
 	if !r.votes[r.id] {
 		t.Errorf("vote for self = false, want true")
 	}
+	log.Printf("msgs:%v", r.msgs)
 	msgs := r.readMessages()
 	sort.Sort(messageSlice(msgs))
 	wmsgs := []pb.Message{
@@ -190,11 +199,13 @@ func TestLeaderElectionInOneRoundRPC2AA(t *testing.T) {
 	for i, tt := range tests {
 		r := newTestRaft(1, idsBySize(tt.size), 10, 1, NewMemoryStorage())
 
+		log.Printf("before: Term=%v, state=%v", r.Term, r.State)
 		r.Step(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
+		log.Printf("Hup: Term=%v, state=%v", r.Term, r.State)
 		for id, vote := range tt.votes {
 			r.Step(pb.Message{From: id, To: 1, Term: r.Term, MsgType: pb.MessageType_MsgRequestVoteResponse, Reject: !vote})
 		}
-
+		log.Printf("response: Term=%v, state=%v", r.Term, r.State)
 		if r.State != tt.state {
 			t.Errorf("#%d: state = %s, want %s", i, r.State, tt.state)
 		}
@@ -225,8 +236,9 @@ func TestFollowerVote2AA(t *testing.T) {
 		r.Term = 1
 		r.Vote = tt.vote
 
+		log.Printf("before: Term=%v, state=%v", r.Term, r.State)
 		r.Step(pb.Message{From: tt.nvote, To: 1, Term: 1, MsgType: pb.MessageType_MsgRequestVote})
-
+		log.Printf("VoteRequest: Term=%v, state=%v", r.Term, r.State)
 		msgs := r.readMessages()
 		wmsgs := []pb.Message{
 			{From: 1, To: tt.nvote, Term: 1, MsgType: pb.MessageType_MsgRequestVoteResponse, Reject: tt.wreject},

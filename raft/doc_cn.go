@@ -155,19 +155,19 @@ raft 包负责 发送和接收 eraftpb.protoc 中定义的消息(Protocol Buffer
 	当发送到candidate，'MessageType_MsgPropose'会被丢弃.
 	当发送到follower，'MessageType_MsgPropose' 通过 send方法 保存到follower's 的mailbox(msgs)，它和发送者ID一起保存，然后通过rafthttp包转发到leader。
 
-	'MessageType_MsgAppend' contains log entries to replicate. A leader calls bcastAppend,
+	'MessageType_MsgAppend' 包含需要复制的log entries。A leader calls bcastAppend,
 	which calls sendAppend, which sends soon-to-be-replicated logs in 'MessageType_MsgAppend'
 	type. When 'MessageType_MsgAppend' is passed to candidate's Step method, candidate reverts
 	back to follower, because it indicates that there is a valid leader sending
 	'MessageType_MsgAppend' messages. Candidate and follower respond to this message in
 	'MessageType_MsgAppendResponse' type.
 
-	'MessageType_MsgAppendResponse' is response to log replication request('MessageType_MsgAppend'). When
+	'MessageType_MsgAppendResponse' 是日志复制请求('MessageType_MsgAppend')的响应结果. When
 	'MessageType_MsgAppend' is passed to candidate or follower's Step method, it responds by
 	calling 'handleAppendEntries' method, which sends 'MessageType_MsgAppendResponse' to raft
 	mailbox.
 
-	'MessageType_MsgRequestVote' requests votes for election. When a node is a follower or
+	'MessageType_MsgRequestVote' 选举投票请求. When a node is a follower or
 	candidate and 'MessageType_MsgHup' is passed to its Step method, then the node calls
 	'campaign' method to campaign itself to become a leader. Once 'campaign'
 	method is called, the node becomes candidate and sends 'MessageType_MsgRequestVote' to peers
@@ -180,19 +180,19 @@ raft 包负责 发送和接收 eraftpb.protoc 中定义的消息(Protocol Buffer
 	sender's last term is equal to MessageType_MsgRequestVote's term but sender's last committed
 	index is greater than or equal to follower's.
 
-	'MessageType_MsgRequestVoteResponse' contains responses from voting request. When 'MessageType_MsgRequestVoteResponse' is
+	'MessageType_MsgRequestVoteResponse' 包含选举投票的结果响应 When 'MessageType_MsgRequestVoteResponse' is
 	passed to candidate, the candidate calculates how many votes it has won. If
 	it's more than majority (quorum), it becomes leader and calls 'bcastAppend'.
 	If candidate receives majority of votes of denials, it reverts back to
 	follower.
 
-	'MessageType_MsgSnapshot' requests to install a snapshot message. When a node has just
+	'MessageType_MsgSnapshot' 请求安装快照消息 When a node has just
 	become a leader or the leader receives 'MessageType_MsgPropose' message, it calls
 	'bcastAppend' method, which then calls 'sendAppend' method to each
 	follower. In 'sendAppend', if a leader fails to get term or entries,
 	the leader requests snapshot by sending 'MessageType_MsgSnapshot' type message.
 
-	'MessageType_MsgHeartbeat' sends heartbeat from leader. When 'MessageType_MsgHeartbeat' is passed
+	'MessageType_MsgHeartbeat' 发送自leader 的心跳. When 'MessageType_MsgHeartbeat' is passed
 	to candidate and message's term is higher than candidate's, the candidate
 	reverts back to follower and updates its committed index from the one in
 	this heartbeat. And it sends the message to its mailbox. When
@@ -200,7 +200,7 @@ raft 包负责 发送和接收 eraftpb.protoc 中定义的消息(Protocol Buffer
 	higher than follower's, the follower updates its leaderID with the ID
 	from the message.
 
-	'MessageType_MsgHeartbeatResponse' is a response to 'MessageType_MsgHeartbeat'. When 'MessageType_MsgHeartbeatResponse'
+	'MessageType_MsgHeartbeatResponse' 是'MessageType_MsgHeartbeat'消息的响应. When 'MessageType_MsgHeartbeatResponse'
 	is passed to the leader's Step method, the leader knows which follower
 	responded.
 

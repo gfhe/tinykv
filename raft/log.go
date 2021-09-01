@@ -14,7 +14,11 @@
 
 package raft
 
-import pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
+import (
+	"log"
+
+	pb "github.com/pingcap-incubator/tinykv/proto/pkg/eraftpb"
+)
 
 // RaftLog manage the log entries, its struct look like:
 //
@@ -30,16 +34,19 @@ type RaftLog struct {
 
 	// committed is the highest log position that is known to be in
 	// stable storage on a quorum of nodes.
+	// 所有小于等于 committed 的index，都是应该持久化到storage的
 	committed uint64
 
 	// applied is the highest log position that the application has
 	// been instructed to apply to its state machine.
 	// Invariant: applied <= committed
+	// 所有小于等于applied的index，均应用到了状态机
 	applied uint64
 
 	// log entries with index <= stabled are persisted to storage.
 	// It is used to record the logs that are not persisted by storage yet.
 	// Everytime handling `Ready`, the unstabled logs will be included.
+	// 所有小于等于stabled的所有index 均持久化到了storage
 	stabled uint64
 
 	// all entries that have not yet compact.
@@ -56,7 +63,11 @@ type RaftLog struct {
 // to the state that it just commits and applies the latest snapshot.
 func newLog(storage Storage) *RaftLog {
 	// Your Code Here (2A).
-	return nil
+	lastIndex, err := storage.LastIndex()
+	if err != nil {
+		panic(err)
+	}
+	return &RaftLog{storage: storage, committed: lastIndex, applied: lastIndex, stabled: lastIndex}
 }
 
 // We need to compact the log entries in some point of time like
@@ -81,11 +92,27 @@ func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 // LastIndex return the last index of the log entries
 func (l *RaftLog) LastIndex() uint64 {
 	// Your Code Here (2A).
-	return 0
+	index, err := l.storage.LastIndex()
+	if err != nil {
+		panic(err)
+	}
+	return index
 }
 
 // Term return the term of the entry in the given index
 func (l *RaftLog) Term(i uint64) (uint64, error) {
 	// Your Code Here (2A).
-	return 0, nil
+	return l.storage.Term(i)
+}
+
+// last term of last index of log entry
+func (l *RaftLog) LastTerm() uint64 {
+	// Your Code Here (2A).
+	lastIndex := l.LastIndex()
+	term, err := l.Term(lastIndex)
+	if err != nil {
+		log.Printf("term of index=%v, error:%v", l.LastIndex(), err)
+		panic(err)
+	}
+	return term
 }
