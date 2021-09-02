@@ -136,10 +136,6 @@ type Raft struct {
 	//额外增加：实际选举超时时间，各节点不同，避免多次split vote
 	randomElectionTimeout int
 
-	// 额外增加：存储所有对等节点
-	// TODO: 后续看看是否可以和 Prs 复用
-	peers []uint64
-
 	// heartbeat interval, should send
 	heartbeatTimeout int
 	// baseline of election interval
@@ -174,6 +170,10 @@ func newRaft(c *Config) *Raft {
 		panic(err.Error())
 	}
 	// Your Code Here (2A).
+	prs := make(map[uint64]*Progress, len(c.peers))
+	for _, peer := range c.peers {
+		prs[peer] = &Progress{}
+	}
 	// 初始时，为Follower,Term为0， 无投票记录，心跳时间固定，选举超时时间增加随机变量，初始化底层RaftLog
 	return &Raft{
 		id:                    c.ID,
@@ -181,7 +181,7 @@ func newRaft(c *Config) *Raft {
 		Term:                  0,
 		Vote:                  None,
 		votes:                 make(map[uint64]bool, 0),
-		peers:                 c.peers,
+		Prs:                   prs,
 		heartbeatTimeout:      c.HeartbeatTick,
 		electionTimeout:       c.ElectionTick,
 		randomElectionTimeout: c.ElectionTick + rand.Intn(c.ElectionTick),
@@ -192,20 +192,31 @@ func newRaft(c *Config) *Raft {
 // current commit index to the given peer. Returns true if a message was sent.
 func (r *Raft) sendAppend(to uint64) bool {
 	// Your Code Here (2A).
-	r.msgs = append(r.msgs, pb.Message{
-		MsgType: pb.MessageType_MsgAppend,
-		To:      to,
-		From:    r.id,
-		Term:    r.Term,
-	})
-	return true
+	if to != r.id {
+		r.msgs = append(r.msgs, pb.Message{
+			MsgType: pb.MessageType_MsgAppend,
+			To:      to,
+			From:    r.id,
+			Term:    r.Term,
+		})
+		return true
+	}
+	return false
 }
 
 // sendHeartbeat sends a heartbeat RPC to the given peer.
 func (r *Raft) sendHeartbeat(to uint64) {
 	// Your Code Here (2A).
+	// log.Printf("[%v T_%v]:send heartbeat to %v", r.id, r.Term, to)
 	if to != r.id {
 		r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgHeartbeat, To: to, From: r.id, Term: r.Term})
+	}
+}
+
+// sendRequestVote sends a requestVote RPC to the given peer
+func (r *Raft) sendRequestVote(to uint64) {
+	if to != r.id {
+		r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgRequestVote, From: r.id, To: to, Term: r.Term})
 	}
 }
 
@@ -292,24 +303,22 @@ func (r *Raft) Step(m pb.Message) error {
 			r.becomeCandidate()
 
 			// NOTE: 如果peer 节点仅有一个直接作为leader
-			if len(r.peers) <= 1 {
+			if len(r.Prs) <= 1 {
 				r.becomeLeader() // 因为此处仅一个节点，不需要发送heartbeat 确立地位
 			} else {
 				// 成为candidate 需要立即发送VoteRequest RPC
-				for _, peer := range r.peers {
-					if peer != r.id {
-						r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgRequestVote, From: r.id, To: peer, Term: r.Term})
-					}
+				for peer := range r.Prs {
+					r.sendRequestVote(peer)
 				}
 			}
 		case pb.MessageType_MsgPropose:
 			// follower 收到propose 消息自动转发给leader
-			r.msgs = append(r.msgs, pb.Message{MsgType: m.GetMsgType(), To: r.Lead, Term: m.GetTerm()})
+			r.msgs = append(r.msgs, pb.Message{MsgType: m.MsgType, To: r.Lead, Term: m.Term})
 		case pb.MessageType_MsgAppend:
 			r.handleAppendEntries(m)
 		case pb.MessageType_MsgRequestVote:
 			// candidate 竞选leader时，会发送此消息，
-			// leader、candidate 收到此消息，且消息term比自身的大，则转为follower
+			// leader、candidate 收到此消息，且消息term比自身的大，则转为follower，然后判断投票
 			// follower 则会判断后投票，或者拒绝
 			r.handleRequestVote(m)
 		case pb.MessageType_MsgSnapshot:
@@ -321,14 +330,12 @@ func (r *Raft) Step(m pb.Message) error {
 			r.becomeCandidate()
 
 			// NOTE: 如果peer 节点仅有一个直接作为leader
-			if len(r.peers) <= 1 {
-				r.becomeLeader() // 因为此处仅一个节点，不需要发送heartbeat 确立地位
+			if len(r.Prs) <= 1 {
+				r.becomeLeader() // 因为此处仅一个节点，不需选举，直接成为leader
 			} else {
 				// 成为candidate 需要立即发送VoteRequest RPC
-				for _, peer := range r.peers {
-					if peer != r.id {
-						r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgRequestVote, From: r.id, To: peer, Term: r.Term})
-					}
+				for peer := range r.Prs {
+					r.sendRequestVote(peer)
 				}
 			}
 		case pb.MessageType_MsgAppend:
@@ -348,16 +355,14 @@ func (r *Raft) Step(m pb.Message) error {
 			for _, v := range r.votes {
 				count[v] += 1
 			}
-			log.Printf("vote result: %v, peer length=%v", count, len(r.peers))
-			if count[true] > len(r.peers)/2 {
+			log.Printf("vote result: %v, peer length=%v", count, len(r.Prs))
+			if count[true] > len(r.Prs)/2 {
 				r.becomeLeader()
 				// 成为leader后，立即发送heartbeat，确立地位
-				for _, peer := range r.peers {
-					if peer != r.id {
-						r.sendHeartbeat(peer)
-					}
+				for peer := range r.Prs {
+					r.sendHeartbeat(peer)
 				}
-			} else if count[false] > len(r.peers)/2 {
+			} else if count[false] > len(r.Prs)/2 {
 				r.becomeFollower(r.Term, None)
 			}
 		case pb.MessageType_MsgSnapshot:
@@ -374,18 +379,16 @@ func (r *Raft) Step(m pb.Message) error {
 		case pb.MessageType_MsgBeat:
 			//只有leader可以处理该消息
 			// leader 收到该消息，向follower 发送心跳
-			for _, peer := range r.peers {
-				if peer != r.id {
-					r.sendHeartbeat(peer)
-				}
+			log.Printf("[%v T_%v]: receive msg beat", r.id, r.Term)
+			for peer := range r.Prs {
+				r.sendHeartbeat(peer)
 			}
 		case pb.MessageType_MsgPropose:
 			// follower 收到propose 消息自动转发给leader, leader 处理propose
 			// TODO：处理propose
-			for _, peer := range r.peers {
-				if peer != r.id {
-					r.sendAppend(peer)
-				}
+			r.RaftLog.AppendEntry(pb.Entry{})
+			for peer := range r.Prs {
+				r.sendAppend(peer)
 			}
 		case pb.MessageType_MsgAppend:
 			// leader 收到此消息，需要判断term，如果消息term较大，则状态出现问题，自动转为follower
