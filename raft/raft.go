@@ -343,9 +343,9 @@ func (r *Raft) Step(m pb.Message) error {
 			r.handleAppendEntries(m)
 		case pb.MessageType_MsgRequestVote:
 			// candidate 竞选leader时，会发送此消息，
-			// leader、candidate 收到此消息，且消息term比自身的大，则转为follower
+			// leader、candidate 收到此消息，且消息term比自身的大，则转为follower, 否则，直接拒绝
 			// follower 则会判断后投票，或者拒绝
-			r.handleRequestVote(m)
+			r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgRequestVoteResponse, From: r.id, To: m.From, Term: r.Term, Reject: true})
 		case pb.MessageType_MsgRequestVoteResponse:
 			// 选举投票结果
 			r.votes[m.GetFrom()] = !m.Reject
@@ -365,8 +365,6 @@ func (r *Raft) Step(m pb.Message) error {
 			} else if count[false] > len(r.Prs)/2 {
 				r.becomeFollower(r.Term, None)
 			}
-		case pb.MessageType_MsgSnapshot:
-			r.handleSnapshot(m)
 		case pb.MessageType_MsgHeartbeat:
 			// 来自leader的心跳，
 			// 如果candidate 收到，且消息term大于自身，则转为follower；
@@ -390,19 +388,14 @@ func (r *Raft) Step(m pb.Message) error {
 			for peer := range r.Prs {
 				r.sendAppend(peer)
 			}
-		case pb.MessageType_MsgAppend:
-			// leader 收到此消息，需要判断term，如果消息term较大，则状态出现问题，自动转为follower
-			if m.Term > r.Term {
-				r.becomeFollower(m.Term, None)
-			}
 		case pb.MessageType_MsgAppendResponse:
 			// 只有leader 对此消息处理
 			log.Printf("[%v T_%v]: %v appended msg", r.id, r.Term, m.From)
 		case pb.MessageType_MsgRequestVote:
 			// candidate 竞选leader时，会发送此消息，
-			// leader、candidate 收到此消息，且消息term比自身的大，则转为follower
+			// leader、candidate 收到此消息，且消息term比自身的大，则转为follower, 否则，直接拒绝
 			// follower 则会判断后投票，或者拒绝
-			r.handleRequestVote(m)
+			r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgRequestVoteResponse, From: r.id, To: m.From, Term: r.Term, Reject: true})
 		case pb.MessageType_MsgRequestVoteResponse:
 			// leader 忽略此消息
 		case pb.MessageType_MsgSnapshot:
@@ -419,9 +412,9 @@ func (r *Raft) Step(m pb.Message) error {
 // handleRequestVote handle RequestVote RPC request
 func (r *Raft) handleRequestVote(m pb.Message) {
 	reject := true
-	log.Printf("m.term=%v, m.from=%v,r.id=%v, r.Lead=%v,r.Vote=%v, r.RaftLog=%v, r.RaftLog.lastIndex=%v, r.RaftLog.lastTerm=%v", m.Term, m.From, r.id, r.Lead, r.Vote, r.RaftLog, r.RaftLog.LastIndex(), r.RaftLog.LastTerm())
-	if ((r.Vote == None && r.Lead == None) || r.Vote == m.From) &&
-		(m.LogTerm > r.RaftLog.LastTerm() || (m.LogTerm == r.RaftLog.LastTerm() && m.Index >= r.RaftLog.LastIndex())) {
+	log.Printf("m.term=%v, m.from=%v,r.id=%v, r.Lead=%v,r.Vote=%v, r.RaftLog=%v, r.RaftLog.lastIndex=%v, r.RaftLog.lastTerm=%v", m.Term, m.From, r.id, r.Lead, r.Vote, r.RaftLog, r.RaftLog.LastIndex(), r.RaftLog.LastLogTerm())
+	if ((r.Vote == None) || r.Vote == m.From) &&
+		(m.LogTerm > r.RaftLog.LastLogTerm() || (m.LogTerm == r.RaftLog.LastLogTerm() && m.Index >= r.RaftLog.LastIndex())) {
 		reject = false
 		r.Vote = m.From
 	}
