@@ -106,7 +106,7 @@ func (l *RaftLog) Term(i uint64) (uint64, error) {
 }
 
 // last term of last index of log entry
-func (l *RaftLog) LastTerm() uint64 {
+func (l *RaftLog) LastLogTerm() uint64 {
 	// Your Code Here (2A).
 	lastIndex := l.LastIndex()
 	term, err := l.Term(lastIndex)

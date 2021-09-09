@@ -384,7 +384,7 @@ func (r *Raft) Step(m pb.Message) error {
 		case pb.MessageType_MsgPropose:
 			// follower 收到propose 消息自动转发给leader, leader 处理propose
 			// TODO：处理propose
-			r.RaftLog.AppendEntry(pb.Entry{})
+			// r.RaftLog.AppendEntry(pb.Entry{})
 			for peer := range r.Prs {
 				r.sendAppend(peer)
 			}
