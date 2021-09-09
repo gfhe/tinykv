@@ -35,62 +35,6 @@ func NewServer(storage storage.Storage) *Server {
 
 // The below functions are Server's gRPC API (implements TinyKvServer).
 
-// Raw API.
-func (server *Server) RawGet(_ context.Context, req *kvrpcpb.RawGetRequest) (*kvrpcpb.RawGetResponse, error) {
-	reader, err := server.storage.Reader(req.GetContext())
-	if err != nil {
-		return nil, err
-	} else {
-		defer reader.Close()
-		v, err := reader.GetCF(req.Cf, req.Key)
-		if err != nil {
-			return nil, err
-		}
-		return &kvrpcpb.RawGetResponse{RegionError: nil, Value: v, NotFound: v == nil}, nil
-	}
-}
-
-func (server *Server) RawPut(_ context.Context, req *kvrpcpb.RawPutRequest) (*kvrpcpb.RawPutResponse, error) {
-
-	err := server.storage.Write(req.GetContext(), []storage.Modify{
-		{Data: storage.Put{Cf: req.Cf, Key: req.Key, Value: req.Value}},
-	})
-	return nil, err
-}
-
-func (server *Server) RawDelete(_ context.Context, req *kvrpcpb.RawDeleteRequest) (*kvrpcpb.RawDeleteResponse, error) {
-	err := server.storage.Write(req.GetContext(), []storage.Modify{
-		{Data: storage.Delete{Cf: req.Cf, Key: req.Key}},
-	})
-	return nil, err
-}
-
-func (server *Server) RawScan(_ context.Context, req *kvrpcpb.RawScanRequest) (*kvrpcpb.RawScanResponse, error) {
-	reader, err := server.storage.Reader(req.GetContext())
-	if err != nil {
-		return nil, err
-	} else {
-		defer reader.Close()
-
-		var res []*kvrpcpb.KvPair
-		it := reader.IterCF(req.GetCf())
-		it.Seek(req.StartKey)
-		for i := 0; it.Valid() && i < int(req.GetLimit()); i++ {
-			item := it.Item()
-			pair := new(kvrpcpb.KvPair)
-			pair.Key = item.KeyCopy(nil)
-			pair.Value, err = item.ValueCopy(nil)
-			if err != nil {
-				return nil, err
-			}
-			res = append(res, pair)
-			it.Next()
-		}
-		it.Close()
-		return &kvrpcpb.RawScanResponse{RegionError: nil, Kvs: res}, nil
-	}
-}
-
 // Raft commands (tinykv <-> tinykv)
 // Only used for RaftStorage, so trivially forward it.
 func (server *Server) Raft(stream tinykvpb.TinyKv_RaftServer) error {
