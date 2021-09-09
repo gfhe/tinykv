@@ -92,17 +92,31 @@ func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 // LastIndex return the last index of the log entries
 func (l *RaftLog) LastIndex() uint64 {
 	// Your Code Here (2A).
-	index, err := l.storage.LastIndex()
+	storageLastIndex, err := l.storage.LastIndex()
 	if err != nil {
 		panic(err)
 	}
-	return index
+	if elen := len(l.entries); elen > 0 {
+		return l.entries[elen-1].Index
+	} else {
+		return storageLastIndex
+	}
 }
 
 // Term return the term of the entry in the given index
 func (l *RaftLog) Term(i uint64) (uint64, error) {
 	// Your Code Here (2A).
-	return l.storage.Term(i)
+	elen := len(l.entries)
+	if elen == 0 {
+		return 0, ErrCompacted
+	} else {
+		offset := l.entries[0].Index
+		if i > offset+uint64(elen)-1 {
+			return 0, ErrUnavailable
+		} else {
+			return l.entries[i-offset].Term, nil
+		}
+	}
 }
 
 // last term of last index of log entry
