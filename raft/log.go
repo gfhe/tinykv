@@ -107,11 +107,11 @@ func (l *RaftLog) unstableEntries() []pb.Entry {
 		panic(err)
 	}
 	if l.LastIndex() <= lastIndex {
-		log.Fatalf("storage last index(%d) >= raft unstable entries last Index(%d)", lastIndex, l.LastIndex())
+		log.Printf("storage last index(%d) >= raft unstable entries last Index(%d)", lastIndex, l.LastIndex())
 		return nil
 	}
 	if l.stabled != lastIndex {
-		log.Fatalf("storage last index(%d) != raft stabled(%d)", lastIndex, l.stabled)
+		log.Printf("storage last index(%d) != raft stabled(%d)", lastIndex, l.stabled)
 	}
 
 	return l.entries[l.stabled+1:]
