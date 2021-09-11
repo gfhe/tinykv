@@ -192,12 +192,33 @@ func newRaft(c *Config) *Raft {
 // current commit index to the given peer. Returns true if a message was sent.
 func (r *Raft) sendAppend(to uint64) bool {
 	// Your Code Here (2A).
+	//TODO: 重置 heartbeat 定时
+
 	if to != r.id {
+		// TODO: 确定发送给followers的entries
+		// 思路：
+		// 1. 通过Prs[i].Next 获取待发送entries的起始Index
+		// 2. 通过Prs[i].Match 获取当前follower 已经成功复制的最后的logEntry 信息：Index 和LogTerm
+		var ents []*pb.Entry
+		toAppendEntries := r.RaftLog.entriesAfter(r.Prs[to].Next)
+		for _, e := range toAppendEntries {
+			ents = append(ents, &e)
+		}
+
+		logTerm, err := r.RaftLog.Term(r.Prs[to].Match)
+		if err != nil {
+			panic(err)
+		}
+
 		r.msgs = append(r.msgs, pb.Message{
 			MsgType: pb.MessageType_MsgAppend,
 			To:      to,
 			From:    r.id,
 			Term:    r.Term,
+			LogTerm: logTerm,             // 用于判断数据是否一致
+			Index:   r.Prs[to].Match,     // 用于判断数据是否一致
+			Commit:  r.RaftLog.committed, // 用于更新follower的committed信息
+			Entries: ents,
 		})
 		return true
 	}
@@ -216,7 +237,8 @@ func (r *Raft) sendHeartbeat(to uint64) {
 // sendRequestVote sends a requestVote RPC to the given peer
 func (r *Raft) sendRequestVote(to uint64) {
 	if to != r.id {
-		r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgRequestVote, From: r.id, To: to, Term: r.Term})
+		// 获取当前节点的最后一个entry信息,用于争取投票
+		r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgRequestVote, From: r.id, To: to, Term: r.Term, Index: r.RaftLog.LastIndex(), LogTerm: r.RaftLog.LastLogTerm()})
 	}
 }
 
@@ -284,7 +306,31 @@ func (r *Raft) becomeLeader() {
 		r.State = StateLeader
 		r.Lead = r.id
 
+		// 更新所有节点的progress
+		for _, progress := range r.Prs {
+			progress.Match = r.RaftLog.LastIndex()
+			progress.Next = r.RaftLog.LastIndex() + 1
+		}
+
+		// 成为leader append 一个noop entry
+		// 初始第一次noop 和后续的不一样？ index 得从0开始计数。
+		r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{Index: r.RaftLog.LastIndex()+1, Term: r.Term})
+		r.makeProgress(r.id, r.RaftLog.LastIndex())
+
+		// 确立leader地位的心跳：leader 发送  noop entry  到follower
+		for p, _ := range r.Prs {
+			if p == r.id {
+				continue
+			}
+			r.sendAppend(p)
+		}
 	}
+}
+
+// makeProgress advanced current progress
+func (r *Raft) makeProgress(p, index uint64)  {
+	r.Prs[p].Match = index
+	r.Prs[p].Next = r.Prs[p].Match +1
 }
 
 // Step the entrance of handle message, see `MessageType`
@@ -358,10 +404,6 @@ func (r *Raft) Step(m pb.Message) error {
 			log.Printf("vote result: %v, peer length=%v", count, len(r.Prs))
 			if count[true] > len(r.Prs)/2 {
 				r.becomeLeader()
-				// 成为leader后，立即发送heartbeat，确立地位
-				for peer := range r.Prs {
-					r.sendHeartbeat(peer)
-				}
 			} else if count[false] > len(r.Prs)/2 {
 				r.becomeFollower(r.Term, None)
 			}
@@ -383,14 +425,39 @@ func (r *Raft) Step(m pb.Message) error {
 			}
 		case pb.MessageType_MsgPropose:
 			// follower 收到propose 消息自动转发给leader, leader 处理propose
-			// TODO：处理propose
-			// r.RaftLog.AppendEntry(pb.Entry{})
+			for _, e := range m.Entries {
+				e.Term = r.Term
+				e.Index = r.RaftLog.LastIndex() + 1
+				r.RaftLog.entries = append(r.RaftLog.entries, *e)
+			}
+			//更新自己的Progress
+			r.makeProgress(r.id, r.RaftLog.LastIndex())
+
+			// 同步到follower
 			for peer := range r.Prs {
 				r.sendAppend(peer)
 			}
 		case pb.MessageType_MsgAppendResponse:
 			// 只有leader 对此消息处理
-			log.Printf("[%v T_%v]: %v appended msg", r.id, r.Term, m.From)
+			log.Printf("[%v T_%v]: %v appended msg, index=%d", r.id, r.Term, m.From, m.Index)
+			if m.Reject {
+				break
+			}
+			//更新follower的progress
+			r.makeProgress(m.From, m.Index)
+
+			// 统计大多数节点的progress，尝试更新自己的 committed 信息
+			var count int
+			for _, pg := range r.Prs {
+				if pg.Match >= m.Index {
+					count++
+				}
+			}
+			if count > len(r.Prs)/2+1 {
+				// 多数节点已经同步，则可以commit
+				r.RaftLog.committed = m.Index
+			}
+
 		case pb.MessageType_MsgRequestVote:
 			// candidate 竞选leader时，会发送此消息，
 			// leader、candidate 收到此消息，且消息term比自身的大，则转为follower, 否则，直接拒绝
@@ -424,12 +491,37 @@ func (r *Raft) handleRequestVote(m pb.Message) {
 // handleAppendEntries handle AppendEntries RPC request
 func (r *Raft) handleAppendEntries(m pb.Message) {
 	// Your Code Here (2A).
-	reject := false
-	if m.Term < r.Term { // term 过小， 直接拒绝
-		reject = true
+	if m.Term < r.Term || // term 过小， 直接拒绝
+		r.RaftLog.LastIndex() < m.Index { // leader 记录的Progress 错误，需要告诉leader更新
+		r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgAppendResponse, To: m.From, Term: r.Term, Index: r.RaftLog.LastIndex(), Reject: true})
+		return
 	}
 	r.becomeFollower(m.Term, m.From)
-	r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgAppendResponse, To: m.From, Term: r.Term, Reject: reject})
+
+	// 获取m.Index对应的Entry， 判断是否冲突
+	lt, err := r.RaftLog.Term(m.Index)
+	if err != nil {
+		panic(err)
+	}
+	if lt != m.LogTerm {
+		// 冲突
+		r.RaftLog.entries = r.RaftLog.entries[:m.Index] // 删除m.Index 和后面的所有entry
+		r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgAppendResponse, To: m.From, Term: r.Term, Index: r.RaftLog.LastIndex(), Reject: true})
+		return
+	}
+
+	// raft 在m.Index 上的Entry的LogTerm为m.LogTerm，则将所有entries加入到合适的位置， **更新commited信息**
+	r.RaftLog.entries = r.RaftLog.entries[:m.Index+1]
+	var ents []pb.Entry
+	for _, e := range m.Entries {
+		ents = append(ents, *e)
+	}
+	log.Printf("[%v T_%v]: accept MsgAppend, append to raft log entries: %d", r.id, r.Term, len(ents))
+	r.RaftLog.entries = append(r.RaftLog.entries, ents...)
+
+	//更新committed信息
+	r.RaftLog.committed = min(m.Commit, r.RaftLog.LastIndex())
+	r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgAppendResponse, To: m.From, Term: r.Term, Index: r.RaftLog.LastIndex(), Reject: false})
 }
 
 // handleHeartbeat handle Heartbeat RPC request

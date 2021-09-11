@@ -117,6 +117,15 @@ func (l *RaftLog) unstableEntries() []pb.Entry {
 	return l.entries[l.stabled+1:]
 }
 
+// 获取RaftLog.entries[i:]
+func (l *RaftLog) entriesAfter(i uint64) []pb.Entry {
+	p, err := l.pos(i)
+	if err!=nil {
+		panic(err)
+	}
+	return l.entries[p:]
+}
+
 // nextEnts returns all the committed but not applied entries
 func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 	// Your Code Here (2A).
@@ -126,17 +135,18 @@ func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 // LastIndex return the last index of the log entries
 func (l *RaftLog) LastIndex() uint64 {
 	// Your Code Here (2A).
-	storageLastIndex, err := l.storage.LastIndex()
-	if err != nil {
-		panic(err)
-	}
 	if elen := len(l.entries); elen > 0 {
 		return l.entries[elen-1].Index
 	} else {
+		storageLastIndex, err := l.storage.LastIndex()
+		if err != nil {
+			panic(err)
+		}
 		return storageLastIndex
 	}
 }
 
+// pos return the position of index i in RaftLog.entries
 func (l *RaftLog) pos(i uint64) (uint64, error) {
 	elen := len(l.entries)
 	log.Printf("pos: index=%d, entries length=%d", i, elen)
@@ -168,7 +178,7 @@ func (l *RaftLog) Term(i uint64) (uint64, error) {
 	return l.entries[pos].Term, nil
 }
 
-// last term of last index of log entry
+// LastLogTerm return the last term of last index of log entry
 func (l *RaftLog) LastLogTerm() uint64 {
 	// Your Code Here (2A).
 	lastIndex := l.LastIndex()
