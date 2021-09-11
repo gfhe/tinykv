@@ -63,7 +63,7 @@ type RaftLog struct {
 // to the state that it just commits and applies the latest snapshot.
 func newLog(storage Storage) *RaftLog {
 	// Your Code Here (2A).
-	//storage中的数据是stabled，但是不一定都commited 和applied。 
+	//storage中的数据是stabled，但是不一定都commited 和applied。
 	//storage 中ents的数据是未进入snapshot的数据，进入snapshot的数据默认是已经applied 和commited的数据。
 	//所以默认storage.firstIndex-1 肯定是commited 和 applied。
 	// 初始化时，如果storage中包含了未确定commit的数据和applied的数据，需要同步到RaftLog中。
@@ -75,7 +75,17 @@ func newLog(storage Storage) *RaftLog {
 	if err != nil {
 		panic(err)
 	}
-	return &RaftLog{storage: storage, committed: lastIndex, applied: lastIndex, stabled: lastIndex}
+	// storage 中存在未提交的entry，恢复到raftlog
+	var ents []pb.Entry
+	log.Printf("RaftLog: storage firstIndex=%d lastIndex=%d", firstIndex, lastIndex)
+	if firstIndex <= lastIndex {
+		ents, err = storage.Entries(firstIndex, lastIndex+1)
+		if err != nil {
+			panic(err)
+		}
+	}
+	log.Printf("new RaftLog entries: %v", ents)
+	return &RaftLog{storage: storage, committed: firstIndex - 1, applied: firstIndex - 1, stabled: lastIndex, entries: ents}
 }
 
 // We need to compact the log entries in some point of time like

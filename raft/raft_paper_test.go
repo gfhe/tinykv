@@ -838,6 +838,7 @@ func TestVoter2AA(t *testing.T) {
 		{[]pb.Entry{{Term: 2, Index: 1}, {Term: 1, Index: 2}}, 1, 1, true},
 	}
 	for i, tt := range tests {
+		log.Printf("\r\ntest %d ----------------------", i)
 		storage := NewMemoryStorage()
 		storage.Append(tt.ents)
 		r := newTestRaft(1, []uint64{1, 2}, 10, 1, storage)
