@@ -412,7 +412,7 @@ func (r *Raft) Step(m pb.Message) error {
 // handleRequestVote handle RequestVote RPC request
 func (r *Raft) handleRequestVote(m pb.Message) {
 	reject := true
-	log.Printf("m.term=%v, m.from=%v,r.id=%v, r.Lead=%v,r.Vote=%v, r.RaftLog=%v, r.RaftLog.lastIndex=%v, r.RaftLog.lastTerm=%v", m.Term, m.From, r.id, r.Lead, r.Vote, r.RaftLog, r.RaftLog.LastIndex(), r.RaftLog.LastLogTerm())
+	log.Printf("m.term=%v, m.LogTerm=%d, m.from=%v,r.id=%v, r.Lead=%v,r.Vote=%v, r.RaftLog=%v, r.RaftLog.lastIndex=%v, r.RaftLog.lastTerm=%v", m.Term, m.LogTerm, m.From, r.id, r.Lead, r.Vote, r.RaftLog, r.RaftLog.LastIndex(), r.RaftLog.LastLogTerm())
 	if ((r.Vote == None) || r.Vote == m.From) &&
 		(m.LogTerm > r.RaftLog.LastLogTerm() || (m.LogTerm == r.RaftLog.LastLogTerm() && m.Index >= r.RaftLog.LastIndex())) {
 		reject = false

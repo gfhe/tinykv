@@ -63,6 +63,14 @@ type RaftLog struct {
 // to the state that it just commits and applies the latest snapshot.
 func newLog(storage Storage) *RaftLog {
 	// Your Code Here (2A).
+	//storage中的数据是stabled，但是不一定都commited 和applied。 
+	//storage 中ents的数据是未进入snapshot的数据，进入snapshot的数据默认是已经applied 和commited的数据。
+	//所以默认storage.firstIndex-1 肯定是commited 和 applied。
+	// 初始化时，如果storage中包含了未确定commit的数据和applied的数据，需要同步到RaftLog中。
+	firstIndex, err := storage.FirstIndex()
+	if err != nil {
+		panic(err)
+	}
 	lastIndex, err := storage.LastIndex()
 	if err != nil {
 		panic(err)
@@ -80,7 +88,23 @@ func (l *RaftLog) maybeCompact() {
 // unstableEntries return all the unstable entries
 func (l *RaftLog) unstableEntries() []pb.Entry {
 	// Your Code Here (2A).
-	return nil
+	elen := len(l.entries)
+	if elen == 0 {
+		return nil
+	}
+	lastIndex, err := l.storage.LastIndex()
+	if err != nil {
+		panic(err)
+	}
+	if l.LastIndex() <= lastIndex {
+		log.Fatalf("storage last index(%d) >= raft unstable entries last Index(%d)", lastIndex, l.LastIndex())
+		return nil
+	}
+	if l.stabled != lastIndex {
+		log.Fatalf("storage last index(%d) != raft stabled(%d)", lastIndex, l.stabled)
+	}
+
+	return l.entries[l.stabled+1:]
 }
 
 // nextEnts returns all the committed but not applied entries
@@ -103,20 +127,35 @@ func (l *RaftLog) LastIndex() uint64 {
 	}
 }
 
+func (l *RaftLog) pos(i uint64) (uint64, error) {
+	elen := len(l.entries)
+	log.Printf("pos: index=%d, entries length=%d", i, elen)
+	if elen == 0 {
+		return 0, ErrCompacted
+	}
+
+	offset := l.entries[0].Index
+	if i < offset {
+		return 0, ErrCompacted
+	} else if i > offset+uint64(elen)-1 {
+		return 0, ErrUnavailable
+	} else {
+		return i - offset, nil
+	}
+}
+
 // Term return the term of the entry in the given index
 func (l *RaftLog) Term(i uint64) (uint64, error) {
 	// Your Code Here (2A).
-	elen := len(l.entries)
-	if elen == 0 {
-		return 0, ErrCompacted
-	} else {
-		offset := l.entries[0].Index
-		if i > offset+uint64(elen)-1 {
-			return 0, ErrUnavailable
-		} else {
-			return l.entries[i-offset].Term, nil
+	pos, err := l.pos(i)
+	log.Printf("Term: index %d pos=%d, err=%v", i, pos, err)
+	if err != nil {
+		if err == ErrCompacted && i == l.stabled {
+			return 0, nil
 		}
+		return 0, err
 	}
+	return l.entries[pos].Term, nil
 }
 
 // last term of last index of log entry

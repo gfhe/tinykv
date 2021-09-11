@@ -841,6 +841,17 @@ func TestVoter2AA(t *testing.T) {
 		storage := NewMemoryStorage()
 		storage.Append(tt.ents)
 		r := newTestRaft(1, []uint64{1, 2}, 10, 1, storage)
+		for j, s := range tt.ents {
+			if p, err := r.RaftLog.pos(s.Index); (err != nil && err != ErrCompacted) || int(p) != j {
+				t.Fatalf("#%d: pos=%d, want %d, err=%v", i, p, j, err)
+			}
+		}
+		if r.RaftLog.LastIndex() != tt.ents[len(tt.ents)-1].Index {
+			t.Fatalf("#%d: raft log last Index=%d, want %d", i, r.RaftLog.LastIndex(), tt.ents[len(tt.ents)-1].Index)
+		}
+		if r.RaftLog.LastLogTerm() != tt.ents[len(tt.ents)-1].Term {
+			t.Fatalf("#%d: raft log last Term=%d, want %d", i, r.RaftLog.LastLogTerm(), tt.ents[len(tt.ents)-1].Term)
+		}
 
 		r.Step(pb.Message{From: 2, To: 1, MsgType: pb.MessageType_MsgRequestVote, Term: 3, LogTerm: tt.logterm, Index: tt.index})
 
