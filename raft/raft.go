@@ -426,7 +426,7 @@ func (r *Raft) Step(m pb.Message) error {
 
 			// NOTE: **仅有一个节点，此时直接commit，无需发送append到follower**
 			if len(r.Prs) == 1 {
-				r.RaftLog.committed +=1
+				r.RaftLog.committed += 1
 			} else {
 				// 同步到follower
 				for peer := range r.Prs {
@@ -493,36 +493,60 @@ func (r *Raft) handleRequestVote(m pb.Message) {
 // handleAppendEntries handle AppendEntries RPC request
 func (r *Raft) handleAppendEntries(m pb.Message) {
 	// Your Code Here (2A).
+	log.Printf("has entries: %v", r.RaftLog.entries)
+	log.Printf("handle append entries: %v", m)
 	if m.Term < r.Term || // term 过小， 直接拒绝
 		r.RaftLog.LastIndex() < m.Index { // leader 记录的Progress 错误，需要告诉leader更新
 		r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgAppendResponse, To: m.From, From: r.id, Term: r.Term, Index: r.RaftLog.LastIndex(), Reject: true})
 		return
 	}
-	r.becomeFollower(m.Term, m.From) // 可能同一个Term 中，其他 candidate 竞选成功，step中的简单term对比无法覆盖
 
 	// 获取m.Index对应的Entry， 判断是否冲突
 	lt, err := r.RaftLog.Term(m.Index)
+	log.Printf("get term(%d)=%d", m.Index, lt)
 	if err != nil {
 		panic(err)
 	}
-	if lt != m.LogTerm {
-		// 冲突
-		r.RaftLog.entries = r.RaftLog.entries[:m.Index] // 删除m.Index 和后面的所有entry
+	//if lt != m.LogTerm {
+	//	// 冲突
+	//	r.RaftLog.entries = r.RaftLog.entries[:m.Index] // 删除m.Index 和后面的所有entry
+	//	log.Printf("truncate to entries:%v", r.RaftLog.entries)
+	//	// NOTE: 原论文此处不会返回，只是截断了
+	//	//r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgAppendResponse, To: m.From, From: r.id, Term: r.Term, Index: r.RaftLog.LastIndex(), Reject: true})
+	//	//return
+	//}
+
+	// raft 在m.Index 上的Entry的LogTerm为m.LogTerm，则将所有entries加入到合适的位置， **更新commited信息**
+	if  lt < m.LogTerm {
+		// raft log 中包含不一致的部分，直接截断重新append
+		r.RaftLog.truncate(m.Index)
+	}else if lt > m.LogTerm {
+		// 消息的LogTerm 过小，
+		// NOTE: 怎么选上leader的？ 可能是网络分区的节点恢复连接
 		r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgAppendResponse, To: m.From, From: r.id, Term: r.Term, Index: r.RaftLog.LastIndex(), Reject: true})
 		return
 	}
-
-	// raft 在m.Index 上的Entry的LogTerm为m.LogTerm，则将所有entries加入到合适的位置， **更新commited信息**
-	if r.RaftLog.LastIndex() > m.Index {
-		// raft log 中包含不一致的部分，直接截断重新append
-		r.RaftLog.entries = r.RaftLog.entries[:m.Index+1]
-	}
-	var ents []pb.Entry
+	r.becomeFollower(m.Term, m.From) // 可能同一个Term 中，其他 candidate 竞选成功，step中的简单term对比无法覆盖
+	// 依次校验每个entry 是否可以append
 	for _, e := range m.Entries {
-		ents = append(ents, *e)
+		if e.Index <= r.RaftLog.LastIndex() {
+			// 判断同Index的Term 是否一致，不一致则截断
+			elt, err := r.RaftLog.Term(e.Index)
+			log.Printf("raftlog term(%d)=%d, msg term(%d)=%d", e.Index, elt, e.Index, e.Term)
+			if err != nil {
+				panic(err)
+			}
+			if elt != e.Term {
+				// raft log 中包含不一致的部分，直接截断重新append
+				r.RaftLog.truncate(e.Index)
+				r.RaftLog.entries = append(r.RaftLog.entries, *e)
+			}
+		} else {
+			r.RaftLog.entries = append(r.RaftLog.entries, *e)
+		}
 	}
-	log.Printf("[%v T_%v]: accept MsgAppend, append to raft log entries: %d", r.id, r.Term, len(ents))
-	r.RaftLog.entries = append(r.RaftLog.entries, ents...)
+
+	log.Printf("[%v T_%v]: after MsgAppend, raftlog.ents=%v", r.id, r.Term, r.RaftLog.entries)
 
 	//更新committed信息
 	r.RaftLog.committed = min(m.Commit, r.RaftLog.LastIndex())

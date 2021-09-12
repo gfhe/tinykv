@@ -99,21 +99,12 @@ func (l *RaftLog) maybeCompact() {
 func (l *RaftLog) unstableEntries() []pb.Entry {
 	// Your Code Here (2A).
 	elen := len(l.entries)
-	if elen == 0 {
-		return nil
+	// raftlog 临时entries 的最后一个entry 的index  <= storage 的last entry index
+	if elen == 0  || l.LastIndex() <= l.stabled{
+		return []pb.Entry{}
 	}
-	lastIndex, err := l.storage.LastIndex()
-	if err != nil {
-		panic(err)
-	}
-	if l.LastIndex() <= lastIndex { // raftlog 临时entries 的最后一个entry 的index  <= storage 的last entry index
-		log.Printf("storage last index(%d) >= raft unstable entries last Index(%d)", lastIndex, l.LastIndex())
-		return nil
-	}
-	if lastIndex != l.stabled {
-		log.Printf("WARN: storage last index(%d) != raft stabled(%d)", lastIndex, l.stabled)
-	}
-	//到此处，必有 storage.LastIndex < raftLog.LastIndex； 获取stabled对应raftLog.entries 的下标
+
+	//到此处，必有 raftLog.stabled < raftLog.LastIndex； 获取stabled对应raftLog.entries 的下标
 	p, err := l.pos(l.stabled + 1)
 	if err != nil {
 		panic(err)
@@ -133,17 +124,28 @@ func (l *RaftLog) entriesAfter(i uint64) []pb.Entry {
 // nextEnts returns all the committed but not applied entries
 func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 	// Your Code Here (2A).
-	// 因为 RaftLog.applied <= RaftLog.committed<=RaftLog.LastIndex, 所以默认从applied 对应的下标开始找
-	pa, erra := l.pos(l.applied)
-	pc, errc := l.pos(l.committed)
-	if erra != nil {
-		panic(erra)
-	}
-	if errc!=nil {
-		panic(errc)
+
+	// storage.FirstIndex <= RaftLog.applied <= RaftLog.committed<=RaftLog.LastIndex,
+
+	pc, err := l.pos(l.committed)
+	if err != nil {
+		panic(err)
 	}
 
-	return l.entries[pa+1 : pc+1]
+	var start uint64
+	// 检查 l.applied = storage.FirstIndex 的情况（l.commited 不一定为l.LastIndex），此情况下，获取pos 会出现ErrCompact 异常，需要单独处理
+	// 根本原因：storage. entry对RaftLog是透明的，需要特殊处理。RaftLog从storage恢复entries时，拿不到0号entry
+	if l.applied == 0 {
+		start = 0
+	} else {
+		// RaftLog.applied 不为0 时， 默认从applied 对应的下标开始找
+		pa, err := l.pos(l.applied)
+		if err != nil {
+			panic(err)
+		}
+		start = pa + 1 // l.applied 不为0时，起点为l.applied 的下一个位置
+	}
+	return l.entries[start : pc+1]
 }
 
 // LastIndex return the last index of the log entries
@@ -152,11 +154,7 @@ func (l *RaftLog) LastIndex() uint64 {
 	if elen := len(l.entries); elen > 0 {
 		return l.entries[elen-1].Index
 	} else {
-		storageLastIndex, err := l.storage.LastIndex()
-		if err != nil {
-			panic(err)
-		}
-		return storageLastIndex
+		return l.stabled
 	}
 }
 
@@ -184,7 +182,7 @@ func (l *RaftLog) Term(i uint64) (uint64, error) {
 	pos, err := l.pos(i)
 	log.Printf("Term: index=%d, pos=%d, err=%v", i, pos, err)
 	if err != nil {
-		if err == ErrCompacted && i == l.stabled {
+		if err == ErrCompacted && i == 0 {
 			return 0, nil
 		}
 		return 0, err
@@ -202,4 +200,24 @@ func (l *RaftLog) LastLogTerm() uint64 {
 		panic(err)
 	}
 	return term
+}
+
+// truncate to delete entries after i, including i
+func (l *RaftLog) truncate(i uint64) {
+	log.Printf("truncate:delete entries after %d, now entries=%v", i, l.entries)
+
+	p, err := l.pos(i)
+	log.Printf("pos(%d)=%d, err=%v", i, p, err)
+	if err != nil {
+		if err == ErrCompacted && i == 0 {
+			p = 0
+		} else {
+			panic(err)
+		}
+	}
+	len_trun := len(l.entries[p:])
+	l.entries = l.entries[:p]
+	// 更新stabled， 可能未commited的，但是已经stabled了
+	l.stabled = l.stabled - uint64(len_trun)
+	log.Printf("truncate: lastIndex=%v, m.Index=%v, to:%v, p=%d, stabled=%d", l.LastIndex(), i, l.entries[:p], p, l.stabled)
 }

@@ -680,6 +680,8 @@ func TestFollowerAppendEntries2AB(t *testing.T) {
 		for _, ent := range tt.wunstable {
 			wunstable = append(wunstable, *ent)
 		}
+		log.Printf("unstable=%v", r.RaftLog.unstableEntries())
+		log.Printf("wunstable=%v", wunstable)
 		if g := r.RaftLog.unstableEntries(); !reflect.DeepEqual(g, wunstable) {
 			t.Errorf("#%d: unstableEnts = %+v, want %+v", i, g, wunstable)
 		}
