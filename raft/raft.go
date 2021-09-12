@@ -312,18 +312,13 @@ func (r *Raft) becomeLeader() {
 			progress.Next = r.RaftLog.LastIndex() + 1
 		}
 
-		// 成为leader append 一个noop entry
-		// 初始第一次noop 和后续的不一样？ index 得从0开始计数。
-		r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{Index: r.RaftLog.LastIndex() + 1, Term: r.Term})
-		r.makeProgress(r.id, r.RaftLog.LastIndex())
-
-		// 确立leader地位的心跳：leader 发送  noop entry  到follower
-		for p, _ := range r.Prs {
-			if p == r.id {
-				continue
-			}
-			r.sendAppend(p)
-		}
+		// 发送确立leader的 noop propose
+		r.Step(pb.Message{
+			MsgType: pb.MessageType_MsgPropose,
+			From: r.id,
+			To: r.id,
+			Entries: []*pb.Entry{{Term: r.Term}},
+		})
 	}
 }
 
