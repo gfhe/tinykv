@@ -106,15 +106,19 @@ func (l *RaftLog) unstableEntries() []pb.Entry {
 	if err != nil {
 		panic(err)
 	}
-	if l.LastIndex() <= lastIndex {
+	if l.LastIndex() <= lastIndex { // raftlog 临时entries 的最后一个entry 的index  <= storage 的last entry index
 		log.Printf("storage last index(%d) >= raft unstable entries last Index(%d)", lastIndex, l.LastIndex())
 		return nil
 	}
-	if l.stabled != lastIndex {
-		log.Printf("storage last index(%d) != raft stabled(%d)", lastIndex, l.stabled)
+	if lastIndex != l.stabled {
+		log.Printf("WARN: storage last index(%d) != raft stabled(%d)", lastIndex, l.stabled)
 	}
-
-	return l.entries[l.stabled+1:]
+	//到此处，必有 storage.LastIndex < raftLog.LastIndex； 获取stabled对应raftLog.entries 的下标
+	p, err := l.pos(l.stabled+1)
+	if err !=nil  {
+		panic(err)
+	}
+	return l.entries[p:]
 }
 
 // 获取RaftLog.entries[i:]
@@ -168,7 +172,7 @@ func (l *RaftLog) pos(i uint64) (uint64, error) {
 func (l *RaftLog) Term(i uint64) (uint64, error) {
 	// Your Code Here (2A).
 	pos, err := l.pos(i)
-	log.Printf("Term: index %d pos=%d, err=%v", i, pos, err)
+	log.Printf("Term: index=%d, pos=%d, err=%v", i, pos, err)
 	if err != nil {
 		if err == ErrCompacted && i == l.stabled {
 			return 0, nil

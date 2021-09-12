@@ -314,7 +314,7 @@ func (r *Raft) becomeLeader() {
 
 		// 成为leader append 一个noop entry
 		// 初始第一次noop 和后续的不一样？ index 得从0开始计数。
-		r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{Index: r.RaftLog.LastIndex()+1, Term: r.Term})
+		r.RaftLog.entries = append(r.RaftLog.entries, pb.Entry{Index: r.RaftLog.LastIndex() + 1, Term: r.Term})
 		r.makeProgress(r.id, r.RaftLog.LastIndex())
 
 		// 确立leader地位的心跳：leader 发送  noop entry  到follower
@@ -328,9 +328,9 @@ func (r *Raft) becomeLeader() {
 }
 
 // makeProgress advanced current progress
-func (r *Raft) makeProgress(p, index uint64)  {
+func (r *Raft) makeProgress(p, index uint64) {
 	r.Prs[p].Match = index
-	r.Prs[p].Next = r.Prs[p].Match +1
+	r.Prs[p].Next = r.Prs[p].Match + 1
 }
 
 // Step the entrance of handle message, see `MessageType`
@@ -493,10 +493,10 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 	// Your Code Here (2A).
 	if m.Term < r.Term || // term 过小， 直接拒绝
 		r.RaftLog.LastIndex() < m.Index { // leader 记录的Progress 错误，需要告诉leader更新
-		r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgAppendResponse, To: m.From, Term: r.Term, Index: r.RaftLog.LastIndex(), Reject: true})
+		r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgAppendResponse, To: m.From, From: r.id, Term: r.Term, Index: r.RaftLog.LastIndex(), Reject: true})
 		return
 	}
-	r.becomeFollower(m.Term, m.From)
+	r.becomeFollower(m.Term, m.From) // 可能同一个Term 中，其他 candidate 竞选成功，step中的简单term对比无法覆盖
 
 	// 获取m.Index对应的Entry， 判断是否冲突
 	lt, err := r.RaftLog.Term(m.Index)
@@ -506,22 +506,27 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 	if lt != m.LogTerm {
 		// 冲突
 		r.RaftLog.entries = r.RaftLog.entries[:m.Index] // 删除m.Index 和后面的所有entry
-		r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgAppendResponse, To: m.From, Term: r.Term, Index: r.RaftLog.LastIndex(), Reject: true})
+		r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgAppendResponse, To: m.From, From: r.id, Term: r.Term, Index: r.RaftLog.LastIndex(), Reject: true})
 		return
 	}
 
-	// raft 在m.Index 上的Entry的LogTerm为m.LogTerm，则将所有entries加入到合适的位置， **更新commited信息**
-	r.RaftLog.entries = r.RaftLog.entries[:m.Index+1]
-	var ents []pb.Entry
-	for _, e := range m.Entries {
-		ents = append(ents, *e)
-	}
-	log.Printf("[%v T_%v]: accept MsgAppend, append to raft log entries: %d", r.id, r.Term, len(ents))
-	r.RaftLog.entries = append(r.RaftLog.entries, ents...)
+	if len(m.Entries) > 0 {
+		// raft 在m.Index 上的Entry的LogTerm为m.LogTerm，则将所有entries加入到合适的位置， **更新commited信息**
+		if r.RaftLog.LastIndex() > m.Index {
+			// raft log 中包含不一致的部分，直接截断重新append
+			r.RaftLog.entries = r.RaftLog.entries[:m.Index+1]
+		}
+		var ents []pb.Entry
+		for _, e := range m.Entries {
+			ents = append(ents, *e)
+		}
+		log.Printf("[%v T_%v]: accept MsgAppend, append to raft log entries: %d", r.id, r.Term, len(ents))
+		r.RaftLog.entries = append(r.RaftLog.entries, ents...)
 
-	//更新committed信息
-	r.RaftLog.committed = min(m.Commit, r.RaftLog.LastIndex())
-	r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgAppendResponse, To: m.From, Term: r.Term, Index: r.RaftLog.LastIndex(), Reject: false})
+		//更新committed信息
+		r.RaftLog.committed = min(m.Commit, r.RaftLog.LastIndex())
+	}
+	r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgAppendResponse, To: m.From, From: r.id, Term: r.Term, Index: r.RaftLog.LastIndex(), Reject: false})
 }
 
 // handleHeartbeat handle Heartbeat RPC request

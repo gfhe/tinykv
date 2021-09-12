@@ -934,6 +934,11 @@ func commitNoopEntry(r *Raft, s *MemoryStorage) {
 	s.Append(r.RaftLog.unstableEntries())
 	r.RaftLog.applied = r.RaftLog.committed
 	r.RaftLog.stabled = r.RaftLog.LastIndex()
+	ll, err := r.RaftLog.storage.LastIndex()
+	if err != nil {
+		panic(err)
+	}
+	log.Printf("|||||r.stabled=%d, r.last=%d, storage.Last=%d", r.RaftLog.stabled, r.RaftLog.LastIndex(), ll)
 }
 
 func acceptAndReply(m pb.Message) pb.Message {
