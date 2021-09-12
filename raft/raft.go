@@ -424,12 +424,17 @@ func (r *Raft) Step(m pb.Message) error {
 			//更新自己的Progress
 			r.makeProgress(r.id, r.RaftLog.LastIndex())
 
-			// 同步到follower
-			for peer := range r.Prs {
-				if peer == r.id {
-					continue
+			// NOTE: **仅有一个节点，此时直接commit，无需发送append到follower**
+			if len(r.Prs) == 1 {
+				r.RaftLog.committed +=1
+			} else {
+				// 同步到follower
+				for peer := range r.Prs {
+					if peer == r.id {
+						continue
+					}
+					r.sendAppend(peer)
 				}
-				r.sendAppend(peer)
 			}
 		case pb.MessageType_MsgAppendResponse:
 			// 只有leader 对此消息处理
@@ -449,7 +454,7 @@ func (r *Raft) Step(m pb.Message) error {
 						count++
 					}
 				}
-				if count > len(r.Prs)/2+1 {
+				if count > len(r.Prs)/2 {
 					// 多数节点已经同步，则可以commit
 					r.RaftLog.committed = m.Index
 				}
