@@ -440,16 +440,19 @@ func (r *Raft) Step(m pb.Message) error {
 			//更新follower的progress
 			r.makeProgress(m.From, m.Index)
 
-			// 统计大多数节点的progress，尝试更新自己的 committed 信息
-			var count int
-			for _, pg := range r.Prs {
-				if pg.Match >= m.Index {
-					count++
+			// 判断是否需要更新commited
+			if m.Index > r.RaftLog.committed {
+				// 统计大多数节点的progress，尝试更新自己的 committed 信息
+				var count int
+				for _, pg := range r.Prs {
+					if pg.Match >= m.Index {
+						count++
+					}
 				}
-			}
-			if count > len(r.Prs)/2+1 {
-				// 多数节点已经同步，则可以commit
-				r.RaftLog.committed = m.Index
+				if count > len(r.Prs)/2+1 {
+					// 多数节点已经同步，则可以commit
+					r.RaftLog.committed = m.Index
+				}
 			}
 
 		case pb.MessageType_MsgRequestVote:

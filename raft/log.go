@@ -114,8 +114,8 @@ func (l *RaftLog) unstableEntries() []pb.Entry {
 		log.Printf("WARN: storage last index(%d) != raft stabled(%d)", lastIndex, l.stabled)
 	}
 	//到此处，必有 storage.LastIndex < raftLog.LastIndex； 获取stabled对应raftLog.entries 的下标
-	p, err := l.pos(l.stabled+1)
-	if err !=nil  {
+	p, err := l.pos(l.stabled + 1)
+	if err != nil {
 		panic(err)
 	}
 	return l.entries[p:]
@@ -124,7 +124,7 @@ func (l *RaftLog) unstableEntries() []pb.Entry {
 // 获取RaftLog.entries[i:]
 func (l *RaftLog) entriesAfter(i uint64) []pb.Entry {
 	p, err := l.pos(i)
-	if err!=nil {
+	if err != nil {
 		panic(err)
 	}
 	return l.entries[p:]
@@ -133,7 +133,17 @@ func (l *RaftLog) entriesAfter(i uint64) []pb.Entry {
 // nextEnts returns all the committed but not applied entries
 func (l *RaftLog) nextEnts() (ents []pb.Entry) {
 	// Your Code Here (2A).
-	return nil
+	// 因为 RaftLog.applied <= RaftLog.committed<=RaftLog.LastIndex, 所以默认从applied 对应的下标开始找
+	pa, erra := l.pos(l.applied)
+	pc, errc := l.pos(l.committed)
+	if erra != nil {
+		panic(erra)
+	}
+	if errc!=nil {
+		panic(errc)
+	}
+
+	return l.entries[pa+1 : pc+1]
 }
 
 // LastIndex return the last index of the log entries
