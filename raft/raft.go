@@ -194,35 +194,31 @@ func (r *Raft) sendAppend(to uint64) bool {
 	// Your Code Here (2A).
 	//TODO: 重置 heartbeat 定时
 
-	if to != r.id {
-		// TODO: 确定发送给followers的entries
-		// 思路：
-		// 1. 通过Prs[i].Next 获取待发送entries的起始Index
-		// 2. 通过Prs[i].Match 获取当前follower 已经成功复制的最后的logEntry 信息：Index 和LogTerm
-		var ents []*pb.Entry
-		toAppendEntries := r.RaftLog.entriesAfter(r.Prs[to].Next)
-		for _, e := range toAppendEntries {
-			ents = append(ents, &e)
-		}
-
-		logTerm, err := r.RaftLog.Term(r.Prs[to].Match)
-		if err != nil {
-			panic(err)
-		}
-
-		r.msgs = append(r.msgs, pb.Message{
-			MsgType: pb.MessageType_MsgAppend,
-			To:      to,
-			From:    r.id,
-			Term:    r.Term,
-			LogTerm: logTerm,             // 用于判断数据是否一致
-			Index:   r.Prs[to].Match,     // 用于判断数据是否一致
-			Commit:  r.RaftLog.committed, // 用于更新follower的committed信息
-			Entries: ents,
-		})
-		return true
+	// 思路：
+	// 1. 通过Prs[i].Next 获取待发送entries的起始Index
+	// 2. 通过Prs[i].Match 获取当前follower 已经成功复制的最后的logEntry 信息：Index 和LogTerm
+	var ents []*pb.Entry
+	toAppendEntries := r.RaftLog.entriesAfter(r.Prs[to].Next)
+	for _, e := range toAppendEntries {
+		ents = append(ents, &e)
 	}
-	return false
+
+	logTerm, err := r.RaftLog.Term(r.Prs[to].Match)
+	if err != nil {
+		panic(err)
+	}
+
+	r.msgs = append(r.msgs, pb.Message{
+		MsgType: pb.MessageType_MsgAppend,
+		To:      to,
+		From:    r.id,
+		Term:    r.Term,
+		LogTerm: logTerm,             // 用于判断数据是否一致
+		Index:   r.Prs[to].Match,     // 用于判断数据是否一致
+		Commit:  r.RaftLog.committed, // 用于更新follower的committed信息
+		Entries: ents,
+	})
+	return true
 }
 
 // sendHeartbeat sends a heartbeat RPC to the given peer.
@@ -315,8 +311,8 @@ func (r *Raft) becomeLeader() {
 		// 发送确立leader的 noop propose
 		r.Step(pb.Message{
 			MsgType: pb.MessageType_MsgPropose,
-			From: r.id,
-			To: r.id,
+			From:    r.id,
+			To:      r.id,
 			Entries: []*pb.Entry{{Term: r.Term}},
 		})
 	}
@@ -430,6 +426,9 @@ func (r *Raft) Step(m pb.Message) error {
 
 			// 同步到follower
 			for peer := range r.Prs {
+				if peer == r.id {
+					continue
+				}
 				r.sendAppend(peer)
 			}
 		case pb.MessageType_MsgAppendResponse:
@@ -505,22 +504,20 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		return
 	}
 
-	if len(m.Entries) > 0 {
-		// raft 在m.Index 上的Entry的LogTerm为m.LogTerm，则将所有entries加入到合适的位置， **更新commited信息**
-		if r.RaftLog.LastIndex() > m.Index {
-			// raft log 中包含不一致的部分，直接截断重新append
-			r.RaftLog.entries = r.RaftLog.entries[:m.Index+1]
-		}
-		var ents []pb.Entry
-		for _, e := range m.Entries {
-			ents = append(ents, *e)
-		}
-		log.Printf("[%v T_%v]: accept MsgAppend, append to raft log entries: %d", r.id, r.Term, len(ents))
-		r.RaftLog.entries = append(r.RaftLog.entries, ents...)
-
-		//更新committed信息
-		r.RaftLog.committed = min(m.Commit, r.RaftLog.LastIndex())
+	// raft 在m.Index 上的Entry的LogTerm为m.LogTerm，则将所有entries加入到合适的位置， **更新commited信息**
+	if r.RaftLog.LastIndex() > m.Index {
+		// raft log 中包含不一致的部分，直接截断重新append
+		r.RaftLog.entries = r.RaftLog.entries[:m.Index+1]
 	}
+	var ents []pb.Entry
+	for _, e := range m.Entries {
+		ents = append(ents, *e)
+	}
+	log.Printf("[%v T_%v]: accept MsgAppend, append to raft log entries: %d", r.id, r.Term, len(ents))
+	r.RaftLog.entries = append(r.RaftLog.entries, ents...)
+
+	//更新committed信息
+	r.RaftLog.committed = min(m.Commit, r.RaftLog.LastIndex())
 	r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgAppendResponse, To: m.From, From: r.id, Term: r.Term, Index: r.RaftLog.LastIndex(), Reject: false})
 }
 
