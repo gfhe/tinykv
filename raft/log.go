@@ -112,7 +112,7 @@ func (l *RaftLog) unstableEntries() []pb.Entry {
 	return l.entries[p:]
 }
 
-// 获取RaftLog.entries[i:]
+// entriesAfter 获取RaftLog.entries[i:]
 func (l *RaftLog) entriesAfter(i uint64) []pb.Entry {
 	p, err := l.pos(i)
 	if err != nil {
@@ -161,7 +161,7 @@ func (l *RaftLog) LastIndex() uint64 {
 // pos return the position of index i in RaftLog.entries
 func (l *RaftLog) pos(i uint64) (uint64, error) {
 	elen := len(l.entries)
-	log.Printf("pos: index=%d, entries length=%d", i, elen)
+	//log.Printf("pos: index=%d, entries length=%d, entries=%v", i, elen, l.entries)
 	if elen == 0 {
 		return 0, ErrCompacted
 	}
@@ -180,7 +180,7 @@ func (l *RaftLog) pos(i uint64) (uint64, error) {
 func (l *RaftLog) Term(i uint64) (uint64, error) {
 	// Your Code Here (2A).
 	pos, err := l.pos(i)
-	log.Printf("Term: index=%d, pos=%d, err=%v", i, pos, err)
+	//log.Printf("Term: index=%d, pos=%d, err=%v", i, pos, err)
 	if err != nil {
 		if err == ErrCompacted && i == 0 {
 			return 0, nil

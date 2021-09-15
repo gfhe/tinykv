@@ -421,6 +421,7 @@ func TestLeaderCommitEntry2AB(t *testing.T) {
 	li := r.RaftLog.LastIndex()
 	r.Step(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgPropose, Entries: []*pb.Entry{{Data: []byte("some data")}}})
 
+	log.Printf("after propose")
 	for _, m := range r.readMessages() {
 		r.Step(acceptAndReply(m))
 	}
@@ -434,6 +435,7 @@ func TestLeaderCommitEntry2AB(t *testing.T) {
 	}
 	msgs := r.readMessages()
 	sort.Sort(messageSlice(msgs))
+	log.Printf("msgs: %v", msgs)
 	for i, m := range msgs {
 		if w := uint64(i + 2); m.To != w {
 			t.Errorf("to = %d, want %d", m.To, w)
@@ -741,6 +743,7 @@ func TestLeaderSyncFollowerLog2AB(t *testing.T) {
 		},
 	}
 	for i, tt := range tests {
+		log.Printf("Round %d -------------------", i)
 		leadStorage := NewMemoryStorage()
 		leadStorage.Append(ents)
 		lead := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, leadStorage)
@@ -759,8 +762,13 @@ func TestLeaderSyncFollowerLog2AB(t *testing.T) {
 		// lead's term and commited index setted up above.
 		n.send(pb.Message{From: 3, To: 1, MsgType: pb.MessageType_MsgRequestVoteResponse, Term: term + 1})
 
+		log.Printf("------------------before propose, l.com=%d, f.com=%d", lead.RaftLog.committed, follower.RaftLog.committed)
+		log.Printf("leader   entries: %v", lead.RaftLog.entries)
+		log.Printf("follower entries: %v", follower.RaftLog.entries)
 		n.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgPropose, Entries: []*pb.Entry{{}}})
 
+		log.Printf("leader: %v", lead.RaftLog)
+		log.Printf("follower: %v\r\n", follower.RaftLog)
 		if g := diffu(ltoa(lead.RaftLog), ltoa(follower.RaftLog)); g != "" {
 			t.Errorf("#%d: log diff:\n%s", i, g)
 		}

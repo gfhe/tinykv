@@ -346,8 +346,12 @@ func TestCommitWithoutNewTermEntry2AB(t *testing.T) {
 	// elect 2 as the new leader with term 2
 	// after append a ChangeTerm entry from the current term, all entries
 	// should be committed
+	log.Printf("----------------------------")
 	tt.send(pb.Message{From: 2, To: 2, MsgType: pb.MessageType_MsgHup})
 
+	log.Printf("peer[1].id=%v", tt.peers[1].(*Raft).id)
+	log.Printf("peer[1].committed=%d", tt.peers[1].(*Raft).RaftLog.committed)
+	log.Printf("sm.RaftLog.committed=%d", sm.RaftLog.committed)
 	if sm.RaftLog.committed != 4 {
 		t.Errorf("committed = %d, want %d", sm.RaftLog.committed, 4)
 	}
