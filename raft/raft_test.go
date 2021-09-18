@@ -153,10 +153,16 @@ func TestLeaderElectionOverwriteNewerLogs2AB(t *testing.T) {
 		votedWithConfig(cfg, 3, 2), // Node 4: Voted but didn't get logs
 		votedWithConfig(cfg, 3, 2)) // Node 5: Voted but didn't get logs
 
+		for i, p := range n.peers {
+			log.Printf("peer #%d, entries: %+v", i, p.(*Raft))
+		}
 	// Node 1 campaigns. The election fails because a quorum of nodes
 	// know about the election that already happened at term 2. Node 1's
 	// term is pushed ahead to 2.
 	n.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
+	for i, p := range n.peers {
+		log.Printf("peer #%d, entries: %+v", i, p.(*Raft).RaftLog.entries)
+	}
 	sm1 := n.peers[1].(*Raft)
 	if sm1.State != StateFollower {
 		t.Errorf("state = %s, want StateFollower", sm1.State)
@@ -275,8 +281,10 @@ func TestLogReplication2AB(t *testing.T) {
 	}
 
 	for i, tt := range tests {
+		log.Printf("Round %d -------------------", i)
 		tt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
 
+		log.Printf("after Leader 1 Hup#################")
 		for _, m := range tt.msgs {
 			tt.send(m)
 		}
@@ -394,6 +402,9 @@ func TestDuelingCandidates2AB(t *testing.T) {
 	nt.cut(1, 3)
 
 	nt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
+	//before, L1 T1 C1 E{(1,1)}
+	//        F2 T1 C1 E{(1,1)}
+	//        F3 T0 C0 E{}
 	nt.send(pb.Message{From: 3, To: 3, MsgType: pb.MessageType_MsgHup})
 
 	// 1 becomes leader since it receives votes from 1 and 2
@@ -601,6 +612,7 @@ func TestHandleMessageType_MsgAppend2AB(t *testing.T) {
 	}
 
 	for i, tt := range tests {
+		log.Printf("Round %d ------------", i)
 		storage := NewMemoryStorage()
 		storage.Append([]pb.Entry{{Index: 1, Term: 1}, {Index: 2, Term: 2}})
 		sm := newTestRaft(1, []uint64{1}, 10, 1, storage)
@@ -719,6 +731,7 @@ func TestAllServerStepdown2AB(t *testing.T) {
 	tterm := uint64(3)
 
 	for i, tt := range tests {
+		log.Printf("Round %d ---------", i)
 		sm := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
 		switch tt.state {
 		case StateFollower:
@@ -731,7 +744,14 @@ func TestAllServerStepdown2AB(t *testing.T) {
 		}
 
 		for j, msgType := range tmsgTypes {
+			if i == 2{
+				log.Printf("before raft=%+v", sm)
+			}
 			sm.Step(pb.Message{From: 2, MsgType: msgType, Term: tterm, LogTerm: tterm})
+
+			if i == 2{
+				log.Printf("after raft=%+v", sm)
+			}
 
 			if sm.State != tt.wstate {
 				t.Errorf("#%d.%d state = %v , want %v", i, j, sm.State, tt.wstate)
@@ -920,11 +940,13 @@ func TestHeartbeatUpdateCommit2AB(t *testing.T) {
 		{5, 10},
 	}
 	for i, tt := range tests {
+		log.Printf("Round %d --------------", i)
 		sm1 := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
-		sm2 := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
-		sm3 := newTestRaft(1, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
+		sm2 := newTestRaft(2, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
+		sm3 := newTestRaft(3, []uint64{1, 2, 3}, 10, 1, NewMemoryStorage())
 		nt := newNetwork(sm1, sm2, sm3)
 		nt.send(pb.Message{From: 1, To: 1, MsgType: pb.MessageType_MsgHup})
+		log.Printf("----------------- before isoloate ---------------")
 		nt.isolate(1)
 		// propose log to old leader should fail
 		for i := 0; i < tt.failCnt; i++ {
@@ -948,7 +970,15 @@ func TestHeartbeatUpdateCommit2AB(t *testing.T) {
 
 		nt.recover()
 		nt.ignore(pb.MessageType_MsgAppend)
+		log.Printf("before beat-----")
+		log.Printf("sm1:%+v, RaftLog=%+v", sm1, sm1.RaftLog)
+		log.Printf("sm2:%+v, RaftLog=%+v, prs=%+v", sm2, sm2.RaftLog, sm2.Prs[1])
+		log.Printf("sm3:%+v, RaftLog=%+v", sm3, sm3.RaftLog)
+		// ID1 L1 T1 C1 E{(1,1),(1,2)}
+		// ID2 L2 T2 C3 E{(1,1),(2,2),(2,3)} prs[1]={M1,N2}
+		// ID3 F3 T2 C3 E{(1,1),(2,2),(2,3)}
 		nt.send(pb.Message{From: 2, To: 2, MsgType: pb.MessageType_MsgBeat})
+		// 2 -> MB: 3 -> F,T2
 		if sm1.RaftLog.committed > 1 {
 			t.Fatalf("#%d: expected sm1 commit: 1, got: %d", i, sm1.RaftLog.committed)
 		}

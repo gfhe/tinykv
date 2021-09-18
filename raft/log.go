@@ -100,7 +100,7 @@ func (l *RaftLog) unstableEntries() []pb.Entry {
 	// Your Code Here (2A).
 	elen := len(l.entries)
 	// raftlog 临时entries 的最后一个entry 的index  <= storage 的last entry index
-	if elen == 0  || l.LastIndex() <= l.stabled{
+	if elen == 0 || l.LastIndex() <= l.stabled {
 		return []pb.Entry{}
 	}
 
@@ -205,7 +205,9 @@ func (l *RaftLog) LastLogTerm() uint64 {
 // truncate to delete entries after i, including i
 func (l *RaftLog) truncate(i uint64) {
 	log.Printf("truncate:delete entries after %d, now entries=%v", i, l.entries)
-
+	if i > l.LastIndex() {
+		return
+	}
 	p, err := l.pos(i)
 	log.Printf("pos(%d)=%d, err=%v", i, p, err)
 	if err != nil {
