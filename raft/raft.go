@@ -209,6 +209,7 @@ func newRaft(c *Config) *Raft {
 func (r *Raft) sendAppend(to uint64) bool {
 	// Your Code Here (2A).
 	//TODO: 重置 heartbeat 定时
+	r.heartbeatElapsed = 0
 
 	// 当leader 与 follower match一致时，仅同步committed信息。获取match的Term作为LogTerm
 	if r.Prs[to].Match == r.Prs[r.id].Match {
