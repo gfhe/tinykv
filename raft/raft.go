@@ -208,16 +208,20 @@ func newRaft(c *Config) *Raft {
 // current commit index to the given peer. Returns true if a message was sent.
 func (r *Raft) sendAppend(to uint64) bool {
 	// Your Code Here (2A).
-	//TODO: 重置 heartbeat 定时
 	r.heartbeatElapsed = 0
+
+	// 同步思路：
+	// 1. 通过Prs[i].Match 获取当前follower 已经成功复制的最后的logEntry 信息：Index 和LogTerm
+	// 2. 【同步数据时，】通过Prs[i].Next 获取待发送entries的起始Index
+
+	logTerm, err := r.RaftLog.Term(r.Prs[to].Match)
+	if err != nil {
+		panic(err)
+	}
 
 	// 当leader 与 follower match一致时，仅同步committed信息。获取match的Term作为LogTerm
 	if r.Prs[to].Match == r.Prs[r.id].Match {
 		log.Printf("[%v T_%v]:only sync committed=%d to follower %d", r.id, r.Term, r.RaftLog.committed, to)
-		logTerm, err := r.RaftLog.Term(r.Prs[to].Match)
-		if err != nil {
-			panic(err)
-		}
 		r.msgs = append(r.msgs, pb.Message{
 			MsgType: pb.MessageType_MsgAppend,
 			To:      to,
@@ -230,19 +234,11 @@ func (r *Raft) sendAppend(to uint64) bool {
 		return true
 	}
 
-	logTerm, err := r.RaftLog.Term(r.Prs[to].Match)
-	if err != nil {
-		panic(err)
-	}
-
-	// 思路：
-	// 1. 通过Prs[i].Next 获取待发送entries的起始Index
-	// 2. 通过Prs[i].Match 获取当前follower 已经成功复制的最后的logEntry 信息：Index 和LogTerm
 	var ents []*pb.Entry
 	toAppendEntries := r.RaftLog.entriesAfter(r.Prs[to].Next)
 	//log.Printf("[%v T_%d]:to %d entries after %d:%v",r.id, r.Term, to, r.Prs[to].Next, toAppendEntries)
 	for _, e := range toAppendEntries {
-		var ent pb.Entry = e // NOTE：重新开辟存储，否则会导致append到ents中的为多个指向相同地址的指针。
+		var ent pb.Entry = e // NOTE：**重新开辟存储，否则会导致append到ents中的为多个指向相同地址的指针。**
 		ents = append(ents, &ent)
 	}
 
