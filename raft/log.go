@@ -66,7 +66,7 @@ func newLog(storage Storage) *RaftLog {
 	//storage中的数据是stabled，但是不一定都commited 和applied。
 	//storage 中ents的数据是未进入snapshot的数据，进入snapshot的数据默认是已经applied 和commited的数据。
 	//所以默认storage.firstIndex-1 肯定是commited 和 applied。
-	// 初始化时，如果storage中包含了未确定commit的数据和applied的数据，需要同步到RaftLog中。
+	//初始化时，如果storage中包含了未确定commit的数据和applied的数据，需要同步到RaftLog中。
 	firstIndex, err := storage.FirstIndex()
 	if err != nil {
 		panic(err)

@@ -607,25 +607,13 @@ func (r *Raft) handleRequestVote(m pb.Message) {
 		m.Index, r.RaftLog.LastIndex(), m.Index >= r.RaftLog.LastIndex())
 	if r.Vote == None || r.Vote == m.From {
 		// 判断candidate 是否up to date：
-		// 1. Term 相等时，看candidate的Term是否大
-		// 2. Term 不等时，看candidate的Index是否大于等于当前节点
-		var upToDate bool
-		if m.LogTerm != r.RaftLog.LastLogTerm() {
-			upToDate = m.LogTerm > r.RaftLog.LastLogTerm()
-		} else {
-			upToDate = m.Index >= r.RaftLog.LastIndex()
-		}
-
-		if upToDate {
+		// 1. 看candidate的LogTerm是否大
+		// 2. LogTerm 相等时，看candidate的Index是否大于等于当前节点
+		if m.LogTerm > r.RaftLog.LastLogTerm() || (m.LogTerm == r.RaftLog.LastLogTerm() && m.Index >=r.RaftLog.LastIndex()) {
 			reject = false
 			r.Vote = m.From
 		}
 	}
-	//if ((r.Vote == None) || r.Vote == m.From) &&
-	//	(m.LogTerm > r.RaftLog.LastLogTerm() || (m.LogTerm == r.RaftLog.LastLogTerm() && m.Index >= r.RaftLog.LastIndex())) {
-	//	reject = false
-	//	r.Vote = m.From
-	//}
 	resp := pb.Message{MsgType: pb.MessageType_MsgRequestVoteResponse, From: r.id, To: m.From, Term: r.Term, LogTerm: r.RaftLog.LastLogTerm(), Reject: reject}
 	r.msgs = append(r.msgs, resp)
 	log.Printf("[%v T_%d]: handle requeset vote, response: %+v", r.id, r.Term, resp)
