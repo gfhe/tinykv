@@ -523,13 +523,11 @@ func (r *Raft) Step(m pb.Message) error {
 						if p == r.id || r.Prs[p].Match < r.RaftLog.committed {
 							continue
 						}
-						r.sendAppend(p)
+						r.sendAppend(p) // 反馈给帮助leader commit 前进的节点，同步到follower committed
 					}
-				} else {
-
 				}
 			} else {
-				r.sendAppend(m.From) // 因为此同步信息无法帮助advance committed信息，直接反馈给当前节点即可
+				r.sendAppend(m.From) // leader的commited已经被多数节点同意，直接同步到follower committed
 			}
 		case pb.MessageType_MsgRequestVote:
 			// candidate 竞选leader时，会发送此消息，
@@ -619,30 +617,21 @@ func (r *Raft) handleRequestVote(m pb.Message) {
 // handleAppendEntries handle AppendEntries RPC request
 func (r *Raft) handleAppendEntries(m pb.Message) {
 	// Your Code Here (2A).
-	// NOTE!!!!：忽略掉不可能的消息
-	if m.LogTerm > m.Term {
-		r.msgs = append(r.msgs, pb.Message{
-			MsgType: pb.MessageType_MsgAppendResponse,
-			To:      m.From,
-			From:    r.id,
-			Term:    r.Term,
-			Reject:  true,
-		})
-		return
-	}
 	log.Printf("[%v T_%d]:has entries: %+v", r.id, r.Term, r.RaftLog.entries)
 	log.Printf("handle append entries: %+v", m)
-	if m.Term < r.Term || // term 过小， 直接拒绝
+	if m.LogTerm > m.Term || // NOTE!!!!：忽略掉不可能的消息
+		m.Term < r.Term || // term 过小， 直接拒绝
 		r.RaftLog.LastIndex() < m.Index { // leader 记录的Progress 错误，需要告诉leader更新
 		r.msgs = append(r.msgs, pb.Message{MsgType: pb.MessageType_MsgAppendResponse, To: m.From, From: r.id, Term: r.Term, Index: r.RaftLog.LastIndex(), Reject: true})
 		return
 	}
 	r.becomeFollower(m.Term, m.From) // 可能同一个Term 中，其他 candidate 竞选成功，step中的简单term对比无法覆盖
 
-	if le := len(m.Entries); le == 0 && m.Index == 0 { // 心跳
+	if le := len(m.Entries); le == 0 && m.Index == 0 { // 心跳消息
 		// 更新commit
 		r.RaftLog.committed = min(m.Commit, r.RaftLog.LastIndex())
-	} else {
+	} else { // 数据消息
+		// 1. 判断是否需要截断
 		// 获取m.Index对应的Entry Term， 判断是否冲突
 		lt, err := r.RaftLog.Term(m.Index)
 		log.Printf("get term(%d)=%d", m.Index, lt)
@@ -651,7 +640,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 		}
 
 		// raft 在m.Index 上的Entry的LogTerm为m.LogTerm，则将所有entries加入到合适的位置， **更新commited信息**
-		if lt != m.LogTerm { // raft 在m.Index 上的Entry的LogTerm != leader 上的同index的Entry LogTerm
+		if r.RaftLog.LastIndex() >=m.Index && lt != m.LogTerm { // raft 在m.Index 上的Entry的LogTerm != leader 上的同index的Entry LogTerm
 			// raft log 中包含不一致的部分，直接截断重新append
 			log.Printf("[%v T_%v]: current entry term=%d != msg term=%d", r.id, r.Term, lt, m.LogTerm)
 			r.RaftLog.truncate(m.Index)
@@ -659,6 +648,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 			return
 		}
 
+		//2. 同步数据
 		// 依次校验每个entry 是否可以append
 		neli := m.Index // neli = new entries last index
 		for _, e := range m.Entries {
@@ -679,6 +669,7 @@ func (r *Raft) handleAppendEntries(m pb.Message) {
 				r.RaftLog.entries = append(r.RaftLog.entries, *e)
 			}
 		}
+		//3. 更新committed
 		// NOTE!!!! raftlog 的committed 只能将m.Entries 中最后一个Index（默认为m.Index） 和leader.Commit 取最小。
 		r.RaftLog.committed = min(m.Commit, neli)
 
